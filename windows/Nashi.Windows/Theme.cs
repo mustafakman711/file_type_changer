@@ -14,7 +14,9 @@ internal static class Theme
     internal static void Apply(string appearance)
     {
         Dark=appearance=="dark"||(appearance=="system"&&Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize","AppsUseLightTheme",1) is int value&&value==0);
-        foreach(var (key,light,dark) in new[]{("Paper","#F9F6ED","#111A14"),("Ink","#243B2B","#E7EBE6"),("Surface","#FFFEF7","#1C281F"),("Inset","#F1EDE0","#151F18"),("Muted","#596650","#A9B5A8"),("Line","#DCDDD1","#344237"),("Sage","#E0EBD2","#243928"),("Sand","#F6E7BE","#3C3421")})
+        foreach(var (key,light,dark) in new[]{("Paper","#F9F6ED","#111A14"),("Ink","#243B2B","#E7EBE6"),("Surface","#FFFEF7","#1C281F"),("Inset","#F1EDE0","#151F18"),("Muted","#596650","#A9B5A8"),("Line","#DCDDD1","#344237"),("Sage","#E0EBD2","#243928"),("Sand","#F6E7BE","#3C3421"),
+            // Conversion wheel in MateBook Mint (the rest of the app keeps its paper palette)
+            ("WheelSurface","#F6FBF8","#17211B"),("WheelPetal","#EAF4EE","#1C2A22"),("WheelLine","#CFE3D6","#2E4537"),("WheelSelected","#BFE5CD","#245A3D"),("WheelSelectedLine","#2F7A55","#98E0B0")})
             Application.Current.Resources[key]=new SolidColorBrush((Color)ColorConverter.ConvertFromString(Dark?dark:light));
         foreach(Window window in Application.Current.Windows)ApplyTitleBar(window);
     }

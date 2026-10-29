@@ -9,7 +9,7 @@ internal static class WheelPresentation
     internal const double Diameter=320;
     internal static double StartAngle(int count)=>count==3?-180:-90;
     internal static Preferences Preferences{get;set;}=new();
-    internal static Brush Backdrop{get{var brush=Theme.Brush("Surface").Clone();brush.Opacity=Preferences.WheelFinish=="glass"?.95:1;return brush;}}
+    internal static Brush Backdrop{get{var brush=Theme.Brush("WheelSurface").Clone();brush.Opacity=Preferences.WheelFinish=="glass"?.95:1;return brush;}}
     internal static double LabelRadius(int count,double half)=>count<=2?180:4*Math.Sin(half)*(Math.Pow(250,3)-Math.Pow(108,3))/(6*half*(250*250-108*108));
     internal static (StackPanel Label,Point Center) Caption(ToolChoice choice,Geometry petal,double angle,double half,int count)
     {
