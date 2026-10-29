@@ -22,4 +22,13 @@
   <ItemGroup>
     <PackageReference Include="bblanchon.PDFium.Win32" Version="155.0.8044" />
   </ItemGroup>
+  <!-- Explorer integration: the menu icon, and NashiShell.exe (the IExplorerCommand
+       server for the Windows 11 top-level menu) published into the same folder. -->
+  <ItemGroup>
+    <Content Include="../../Resources/Brand/NashiMenu.ico" Link="NashiMenu.ico" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="../Nashi.Shell/Nashi.Shell.csproj" ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+  <Target Name="PublishExplorerMenuServer" AfterTargets="Publish">
+    <MSBuild Projects="../Nashi.Shell/Nashi.Shell.csproj" Targets="Publish" Properties="Configuration=$(Configuration);PublishDir=$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)','$(PublishDir)'))))" />
+  </Target>
 </Project>
