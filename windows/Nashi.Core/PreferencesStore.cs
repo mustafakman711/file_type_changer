@@ -6,6 +6,10 @@ public sealed record Preferences
     public string Language{get;init;}="en";
     public bool AutomaticUpdateChecks{get;init;}=true;
     public bool Enabled{get;init;}=true;public bool Feedback{get;init;}=true;public bool Animations{get;init;}=true;public bool KeepInTray{get;init;}=true;public bool RevealFinished{get;init;}
+    /// Start the light tray instance at sign-in (HKCU Run). Opt-out in Settings.
+    public bool LaunchAtLogin{get;init;}=true;
+    /// Classic "Show more options" Explorer entries (HKCU, no administrator).
+    public bool ExplorerMenu{get;init;}=true;
     public double WheelScale{get;init;}=1;public string WheelFinish{get;init;}="glass";public string FloatBehavior{get;init;}="createNew";
     public string ToolsModifier{get;init;}="Ctrl";public string ConvertModifier{get;init;}="Shift";public string ActionsModifier{get;init;}="Alt";
     public string OutputMode{get;init;}="beside";public string OutputFolder{get;init;}="";public string DownloadFolder{get;init;}=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),"Downloads");

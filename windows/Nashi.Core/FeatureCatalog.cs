@@ -15,14 +15,18 @@ public static class FeatureCatalog
     public static bool IsAudio(string path)=>new[]{"mp3","m4a","wav","flac","ogg","opus","aiff","wma","aac"}.Contains(Extension(path));
     public static bool IsArchive(string path)=>new[]{"zip","tar","gz","rar"}.Contains(Extension(path));
     public static string[] Formats(IReadOnlyList<string> inputs)=>Intersect(inputs,Data.ConversionMatrix);
+    /// Explorer already knows which items are folders; asking the file system
+    /// again could stall the shell on slow or offline network locations.
+    public static string[] Formats(IReadOnlyList<string> inputs,Func<string,bool>? isDirectory)=>Intersect(inputs,Data.ConversionMatrix,isDirectory);
     public static string[] Tools(IReadOnlyList<string> inputs)
     {
         var result=Intersect(inputs,inputs.Count>1?Data.MultipleTools:Data.SingleTools).ToList();
         if(inputs.Count>0&&inputs.All(p=>IsImage(p)||Extension(p)=="pdf"))result.Add("readQRCode");return result.ToArray();
     }
-    private static string[] Intersect(IReadOnlyList<string> inputs,Dictionary<string,string[]> table)
+    private static string[] Intersect(IReadOnlyList<string> inputs,Dictionary<string,string[]> table,Func<string,bool>? isDirectory=null)
     {
-        if(inputs.Count==0||inputs.Any(p=>Directory.Exists(p)&&Extension(p) is not ("pages" or "rtfd")))return [];
+        isDirectory??=Directory.Exists;
+        if(inputs.Count==0||inputs.Any(p=>isDirectory(p)&&Extension(p) is not ("pages" or "rtfd")))return [];
         return table.GetValueOrDefault(Extension(inputs[0]),[]).Where(f=>inputs.All(p=>table.GetValueOrDefault(Extension(p),[]).Contains(f))).ToArray();
     }
 }
