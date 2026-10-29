@@ -181,6 +181,7 @@ public sealed partial class ToolEditor:Window
     private void SyncTimeline(){if(fields.ContainsKey("Start")&&fields.ContainsKey("End"))timeline.Set(duration,Value("Start"),Value("End",duration));}
     private double FineSeekStep=>media?.Video is {} video?1/Math.Max(1,video.FrameRate):.1;
     private void Save()=>ReadSettings(true);
+    internal bool AcceptDefaults(string requestedFormat)=>format.SelectedItem as string==requestedFormat&&ReadSettings(false);
     private bool ReadSettings(bool accept)
     {
         try
