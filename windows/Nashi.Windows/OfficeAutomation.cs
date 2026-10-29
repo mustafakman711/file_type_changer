@@ -80,7 +80,9 @@ internal sealed class OfficeAutomation:IDisposable
 
     internal static Job? For(string extension,string format)=>(extension,format) switch
     {
-        ("docx" or "doc" or "docm" or "dotx" or "rtf" or "odt","pdf")=>Installed("Word")?Job.WordPdf:null,
+        ("docx" or "doc" or "docm" or "dotx" or "rtf" or "odt" or "txt","pdf")=>Installed("Word")?Job.WordPdf:null,
+        // Word starts in seconds (and stays warm); LibreOffice needs ~7 s warm, ~20-30 s on a fresh profile.
+        ("doc" or "docm" or "dotx" or "rtf" or "odt" or "txt","docx")=>Installed("Word")?Job.WordDocx:null,
         ("pptx" or "ppt" or "pptm" or "ppsx" or "pps" or "odp","pdf")=>Installed("PowerPoint")?Job.PowerPointPdf:null,
         ("xlsx" or "xls" or "xlsm" or "ods","pdf")=>Installed("Excel")?Job.ExcelPdf:null,
         ("pdf","docx")=>Installed("Word")?Job.WordDocx:null,
@@ -174,7 +176,11 @@ internal sealed class OfficeAutomation:IDisposable
         {
             case Job.WordPdf or Job.WordDocx:
             {
-                dynamic document=Retry(()=>app.Documents.Open(FileName:work.Input,ConfirmConversions:false,ReadOnly:true,AddToRecentFiles:false,PasswordDocument:NoPassword,WritePasswordDocument:NoPassword,Revert:false,Visible:false,OpenAndRepair:false,NoEncodingDialog:true));
+                // Plain text arrives normalized to UTF-8 without a BOM; 65001 = msoEncodingUTF8, so Word does not guess a code page.
+                var text=Nashi.Core.FeatureCatalog.Extension(work.Input)=="txt";
+                dynamic document=Retry(()=>text
+                    ?app.Documents.Open(FileName:work.Input,ConfirmConversions:false,ReadOnly:true,AddToRecentFiles:false,PasswordDocument:NoPassword,WritePasswordDocument:NoPassword,Revert:false,Visible:false,OpenAndRepair:false,NoEncodingDialog:true,Encoding:65001)
+                    :app.Documents.Open(FileName:work.Input,ConfirmConversions:false,ReadOnly:true,AddToRecentFiles:false,PasswordDocument:NoPassword,WritePasswordDocument:NoPassword,Revert:false,Visible:false,OpenAndRepair:false,NoEncodingDialog:true));
                 try
                 {
                     // 17 = wdExportFormatPDF; bookmarks from headings, tagged PDF,

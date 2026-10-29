@@ -25,7 +25,8 @@ public sealed class DocumentConversion(OfficeRuntime runtime,Toolchain tools)
             async Task<string> PdfAsync(string from)
             {
                 // Microsoft Office renders its own formats fastest and most faithfully; LibreOffice is the fallback.
-                if(from==input&&OfficeAutomation.For(ext,"pdf") is {} job){var produced=Path.Combine(work,Path.GetFileNameWithoutExtension(input)+".pdf");if(await (microsoft??=OfficeAutomation.Acquire()).TryConvertAsync(job,input,produced,token))return produced;if(File.Exists(produced))File.Delete(produced);}
+                // Same format as the input (plain text is a normalized copy), not an intermediate HTML.
+                if(FeatureCatalog.Extension(from)==ext&&OfficeAutomation.For(ext,"pdf") is {} job){var produced=Path.Combine(work,Path.GetFileNameWithoutExtension(input)+".pdf");if(await (microsoft??=OfficeAutomation.Acquire()).TryConvertAsync(job,input,produced,token))return produced;if(File.Exists(produced))File.Delete(produced);}
                 return await Require(engine).OfficeAsync(from,"pdf",work,token);
             }
             if(ext=="pages"){if(engine is null||!tools.Ready)throw new InvalidOperationException("Set up office and media tools once to enable native Pages interoperability.");source=await engine.PagesReadAsync(input,work,token);}
@@ -61,6 +62,8 @@ public sealed class DocumentConversion(OfficeRuntime runtime,Toolchain tools)
             if(format=="epub"&&options.EpubLayout=="fixed")
             {var pdf=await PdfAsync(source);var output=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+".epub");EpubFixed(await NativePdf.RenderAsync(pdf,options.Dpi,token,ext=="pdf"?options.Password:""),output,Path.GetFileNameWithoutExtension(input));outputs.Add(output);continue;}
             if(FeatureCatalog.Extension(source)=="html"){var safe=Path.Combine(work,"Safe.html");await File.WriteAllTextAsync(safe,OfficeDocuments.SanitizedHtml(await File.ReadAllTextAsync(source,token)),token);source=safe;}
+            if(format=="docx"&&ext!="pdf"&&FeatureCatalog.Extension(source)==ext&&OfficeAutomation.For(ext,"docx") is {} wordDocx)
+            {var output=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+".docx");if(await (microsoft??=OfficeAutomation.Acquire()).TryConvertAsync(wordDocx,source,output,token)){outputs.Add(output);progress?.Report(new((i+1d)/inputs.Count*.98,"Saving document…"));continue;}if(File.Exists(output))File.Delete(output);}
             var converted=format=="pdf"?await PdfAsync(source):await Require(engine).OfficeAsync(source,format,work,token);var target=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+"."+format);File.Move(converted,target);outputs.Add(target);progress?.Report(new((i+1d)/inputs.Count*.98,"Saving document…"));
         }
         return tx.Publish(outputs,token);
