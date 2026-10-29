@@ -15,9 +15,10 @@ internal sealed class HeadlessConversion
     private static string ToolsRoot=>Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Nashi","Tools");
     private readonly PreferencesStore preferences;private readonly LibraryStore library;
     private readonly Dictionary<string,List<string>> pending=new(StringComparer.Ordinal);private readonly Queue<(string Format,string[] Files)> jobs=new();
-    private readonly DispatcherTimer debounce;private bool running;private CancellationTokenSource? active;
+    private readonly DispatcherTimer debounce;private bool running;private CancellationTokenSource? active;private ToastWindow? finished;
     internal bool Busy=>running||jobs.Count>0||pending.Count>0;
-    /// Raised on the UI thread when the queue drains.
+    /// Raised on the UI thread when the queue drains, and again when the last
+    /// "done" toast has faded (a one-shot process exits only then).
     internal event Action? Idle;
     /// Raised after outputs are recorded in Library.
     internal event Action? Recorded;
@@ -25,10 +26,16 @@ internal sealed class HeadlessConversion
     {
         this.preferences=preferences;this.library=library;debounce=new(){Interval=merge??TimeSpan.FromMilliseconds(450)};debounce.Tick+=(_,_)=>{debounce.Stop();Flush();};
     }
-    internal void Enqueue(string format,IEnumerable<string> files)
+    /// Command-line/Explorer requests are merged for a moment (the classic menu
+    /// starts one process per selected file); a wheel drop already carries the
+    /// whole selection and starts at once.
+    internal void Enqueue(string format,IEnumerable<string> files,bool merge=true)
     {
         if(!pending.TryGetValue(format,out var list))pending[format]=list=[];
-        list.AddRange(files);debounce.Stop();debounce.Start();
+        var arrived=files.ToArray();list.AddRange(arrived);debounce.Stop();
+        // Word/PowerPoint start during the merge window instead of after it.
+        OfficeAutomation.Prewarm(arrived,format);
+        if(merge)debounce.Start();else Flush();
     }
     internal void Cancel(){pending.Clear();jobs.Clear();active?.Cancel();}
     private void Flush()
@@ -58,22 +65,21 @@ internal sealed class HeadlessConversion
         string destination;var settings=preferences.Value;
         if(settings.OutputMode=="ask"){var folder=new OpenFolderDialog{Title="Save new files to…",InitialDirectory=Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)};if(folder.ShowDialog()!=true)return;destination=folder.FolderName;}
         else destination=settings.OutputMode=="folder"&&!string.IsNullOrWhiteSpace(settings.OutputFolder)?settings.OutputFolder:Path.GetDirectoryName(selected[0])!;
+        // A previous job's "done" toast gives way to this job's progress.
+        finished?.Close();
         using var cancellation=new CancellationTokenSource();active=cancellation;var toast=new ToastWindow(null,cancellation.Cancel);toast.Show();
         try
         {
             var outputs=await work(destination,new Progress<OperationProgress>(toast.Update),cancellation.Token);toast.Complete(outputs);
+            // The next job (and the trim timer) does not wait for the toast to
+            // fade; a one-shot process still exits only after it has closed.
+            finished=toast;toast.Closed+=(_,_)=>{if(ReferenceEquals(finished,toast))finished=null;if(!Busy)Idle?.Invoke();};
             try{if(!ExplorerIntegration.Isolated){library.Record(label,outputs);Recorded?.Invoke();}}catch(Exception error)when(error is IOException or UnauthorizedAccessException){/* Outputs are saved; Library is best effort. */}
             if(settings.RevealFinished&&outputs.Count>0)MainWindow.Reveal(outputs[0]);
-            await WaitClosedAsync(toast);
         }
         catch(OperationCanceledException){toast.Close();}
         catch(Exception error){toast.Close();MessageBox.Show(L10n.Text(error.Message),L10n.Text("Couldn’t finish"),MessageBoxButton.OK,MessageBoxImage.Information);}
         finally{active=null;}
-    }
-    /// The toast fades out on its own; a one-shot process exits only afterwards.
-    private static Task WaitClosedAsync(Window window)
-    {
-        if(!window.IsVisible)return Task.CompletedTask;var closed=new TaskCompletionSource();window.Closed+=(_,_)=>closed.TrySetResult();return closed.Task;
     }
     /// Mirrors MainWindow.EditAsync / EditDocumentAsync for a requested format.
     private async Task<Func<string,IProgress<OperationProgress>,CancellationToken,Task<IReadOnlyList<string>>>?> PrepareAsync(string[] selected,string format,Toolchain tools)

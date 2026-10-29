@@ -8,8 +8,12 @@ public enum LaunchKind{Open,Background,Convert,Wheel}
 /// which can never be an existing Windows path.
 public sealed record LaunchCommand(LaunchKind Kind,string? Format,string[] Paths)
 {
+    /// For conversions: these paths are the complete selection (the Explorer
+    /// menu server sends it in one go), so the resident instance starts at once
+    /// instead of waiting to merge requests from further processes.
+    public bool Whole{get;init;}
     public const int MessagePathLimit=250;
-    private const string ConvertHeader="nashi:convert",WheelHeader="nashi:wheel",BackgroundHeader="nashi:background";
+    private const string ConvertHeader="nashi:convert",WholeConvertHeader="nashi:convert-whole",WheelHeader="nashi:wheel",BackgroundHeader="nashi:background";
     public static LaunchCommand Open(params string[] paths)=>new(LaunchKind.Open,null,paths);
 
     /// `--convert FORMAT [--files-from LIST] PATH...`, `--wheel PATH...`,
@@ -61,6 +65,8 @@ public sealed record LaunchCommand(LaunchKind Kind,string? Format,string[] Paths
     /// single-instance message limits.
     public IReadOnlyList<string[]> ToMessages(int limit=MessagePathLimit)
     {
+        // A whole selection marks only its last chunk, so the chunks before it still merge.
+        if(Kind==LaunchKind.Convert&&Whole){var chunks=(this with{Whole=false}).ToMessages(limit).ToArray();chunks[^1]=[WholeConvertHeader,..chunks[^1].Skip(1)];return chunks;}
         string[] header=Kind switch{LaunchKind.Convert=>[ConvertHeader,Format!],LaunchKind.Wheel=>[WheelHeader],LaunchKind.Background=>[BackgroundHeader],_=>[]};
         if(Kind==LaunchKind.Background)return [header];
         if(Kind==LaunchKind.Open)return [Paths.Take(256).ToArray()];
@@ -74,6 +80,7 @@ public sealed record LaunchCommand(LaunchKind Kind,string? Format,string[] Paths
         if(message.Count>0&&message[0]==BackgroundHeader)return new(LaunchKind.Background,null,[]);
         if(message.Count>0&&message[0]==WheelHeader)return new(LaunchKind.Wheel,null,Existing(message.Skip(1)));
         if(message.Count>1&&message[0]==ConvertHeader&&NormalizeFormat(message[1]) is {} format)return new(LaunchKind.Convert,format,Existing(message.Skip(2)));
+        if(message.Count>1&&message[0]==WholeConvertHeader&&NormalizeFormat(message[1]) is {} whole)return new(LaunchKind.Convert,whole,Existing(message.Skip(2))){Whole=true};
         if(message.Count>0&&message[0].StartsWith("nashi:",StringComparison.Ordinal))return new(LaunchKind.Background,null,[]);
         return new(LaunchKind.Open,null,message.Where(p=>!string.IsNullOrEmpty(p)&&exists(p)).ToArray());
     }

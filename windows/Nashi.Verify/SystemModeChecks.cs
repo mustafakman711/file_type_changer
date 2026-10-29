@@ -39,6 +39,10 @@ internal static class SystemModeChecks
         check(batches.Count==3&&batches.All(m=>m.Length<=LaunchCommand.MessagePathLimit+2&&m.Length<=256),"Large selections must be split under the single-instance message limit");
         var received=batches.Select(m=>LaunchCommand.FromMessage(m,all.Contains)).ToArray();
         check(received.All(r=>r.Kind==LaunchKind.Convert&&r.Format=="jpg")&&received.SelectMany(r=>r.Paths).SequenceEqual(many),"Convert messages lost files or their format");
+        // The Explorer menu sends a whole selection: only its last chunk starts the job at once.
+        var whole=(new LaunchCommand(LaunchKind.Convert,"jpg",many){Whole=true}).ToMessages().Select(m=>LaunchCommand.FromMessage(m,all.Contains)).ToArray();
+        check(whole.Length==3&&whole.Select(r=>r.Whole).SequenceEqual(new[]{false,false,true})&&whole.All(r=>r.Kind==LaunchKind.Convert&&r.Format=="jpg")&&whole.SelectMany(r=>r.Paths).SequenceEqual(many),"A whole Explorer selection must keep its files and start only after its last chunk");
+        check(!received.Any(r=>r.Whole)&&LaunchCommand.Parse(["--convert","jpg",a],exists).Whole==false,"Command-line conversions must keep merging per-file Explorer launches");
         check(LaunchCommand.FromMessage(LaunchCommand.Open(a).ToMessages().Single(),exists) is {Kind:LaunchKind.Open} plain&&plain.Paths.Single()==a&&LaunchCommand.Open(a).ToMessages().Single().SequenceEqual(new[]{a}),"Plain launches must keep the original message format");
         check(LaunchCommand.FromMessage(new LaunchCommand(LaunchKind.Wheel,null,[folder]).ToMessages().Single(),exists).Kind==LaunchKind.Wheel,"Tools wheel request was not recognised");
         check(LaunchCommand.FromMessage(new LaunchCommand(LaunchKind.Background,null,[]).ToMessages().Single(),exists).Kind==LaunchKind.Background,"A second sign-in launch must not open the window");

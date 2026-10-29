@@ -13,6 +13,8 @@ internal static class ExplorerIntegration
     [DllImport("shell32.dll")]private static extern void SHChangeNotify(int eventId,uint flags,IntPtr item1,IntPtr item2);
     /// Explorer/benchmark isolation: never touch the user's registry.
     internal static bool Isolated=>Environment.GetEnvironmentVariable("NASHI_ISOLATED")=="1";
+    /// Isolated runs (benchmarks, tests) may also keep Library and settings in their own folder.
+    internal static string? IsolatedDataDirectory=>Isolated&&Environment.GetEnvironmentVariable("NASHI_DATA_DIRECTORY") is {Length:>0} folder?Path.GetFullPath(folder):null;
     internal static string Executable=>Environment.ProcessPath??Path.Combine(AppContext.BaseDirectory,"Nashi.exe");
     internal static string IconPath=>Path.Combine(Path.GetDirectoryName(Executable)!,"NashiMenu.ico");
 

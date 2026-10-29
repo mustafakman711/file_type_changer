@@ -32,6 +32,7 @@ public sealed class ToastWindow:Window
         complete=true;L10n.SetText(label,outputs.Count==0?"All set. You’re ready to go.":$"Nicely done. {outputs.Count} {(outputs.Count==1?"file is":"files are")} ready.");detail.Text=outputs.Count>0?Path.GetFileName(outputs[0]):"Ready.";bar.Visibility=Visibility.Collapsed;L10n.Bind(action,ContentControl.ContentProperty,"Show in Explorer");action.IsEnabled=true;
         // Replace the cancel handler by disabling its callback after completion.
         action.Click+=(_,_)=>{if(outputs.Count>0&&(File.Exists(outputs[0])||Directory.Exists(outputs[0])))MainWindow.Reveal(outputs[0]);};
-        var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(3)};timer.Tick+=(_,_)=>{timer.Stop();if(WheelPresentation.Preferences.Animations&&SystemParameters.ClientAreaAnimation){var fade=new DoubleAnimation(0,TimeSpan.FromMilliseconds(280));fade.Completed+=(_,_)=>Close();BeginAnimation(OpacityProperty,fade);}else Close();};timer.Start();
+        // A newer toast may already have replaced this one.
+        var timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(3)};Closed+=(_,_)=>timer.Stop();timer.Tick+=(_,_)=>{timer.Stop();if(!IsVisible)return;if(WheelPresentation.Preferences.Animations&&SystemParameters.ClientAreaAnimation){var fade=new DoubleAnimation(0,TimeSpan.FromMilliseconds(280));fade.Completed+=(_,_)=>{if(IsVisible)Close();};BeginAnimation(OpacityProperty,fade);}else Close();};timer.Start();
     }
 }

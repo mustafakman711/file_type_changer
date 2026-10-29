@@ -96,7 +96,7 @@ public sealed class FormatCommand(string format):IExplorerCommand
     public int Invoke(IShellItemArray? items,IntPtr bindContext)
     {
         Server.Touch();var selection=Selection.Read(items);if(selection is null||!selection.Formats.Contains(format))return Native.E_INVALIDARG;
-        Router.Send(new LaunchCommand(LaunchKind.Convert,format,selection.Paths));return Native.S_OK;
+        Router.Send(new LaunchCommand(LaunchKind.Convert,format,selection.Paths){Whole=true});return Native.S_OK;
     }
     public int GetFlags(out uint flags){flags=Native.ECF_DEFAULT;return Native.S_OK;}
     public int EnumSubCommands(out IntPtr commands){commands=IntPtr.Zero;return Native.E_NOTIMPL;}

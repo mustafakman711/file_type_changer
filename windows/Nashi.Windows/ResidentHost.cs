@@ -35,7 +35,7 @@ internal sealed class ResidentHost:IDisposable
 
     internal ResidentHost(Application app)
     {
-        this.app=app;Library=new LibraryStore();Preferences=new(Library.DirectoryPath);ApplyPreferences();Theme.Apply(Library.Appearance);
+        this.app=app;Library=new LibraryStore(ExplorerIntegration.IsolatedDataDirectory);Preferences=new(Library.DirectoryPath);ApplyPreferences();Theme.Apply(Library.Appearance);
         // A hidden top-level tool window (not message-only) so TaskbarCreated
         // still reaches the tray icon after an Explorer restart.
         window=new HwndSource(new HwndSourceParameters("Nashi")
@@ -81,7 +81,7 @@ internal sealed class ResidentHost:IDisposable
         {
             case LaunchKind.Open:StartDesktop();ShowMain(command.Paths);break;
             case LaunchKind.Background:StartDesktop();break;
-            case LaunchKind.Convert:if(command.Paths.Length>0)conversions.Enqueue(command.Format!,command.Paths);else AfterWork();break;
+            case LaunchKind.Convert:if(command.Paths.Length>0)conversions.Enqueue(command.Format!,command.Paths,merge:!command.Whole);else AfterWork();break;
             case LaunchKind.Wheel:wheelPaths.AddRange(command.Paths);wheelMerge.Stop();wheelMerge.Start();break;
         }
     }
@@ -121,7 +121,7 @@ internal sealed class ResidentHost:IDisposable
         if(paths is {Length:>0}&&action.StartsWith("convert:",StringComparison.Ordinal)&&main is not {IsVisible:true})
         {
             // Back in the tray: convert headlessly instead of building the main window.
-            var format=action[8..];Dispatcher.CurrentDispatcher.BeginInvoke(()=>conversions.Enqueue(format,paths));return;
+            var format=action[8..];Dispatcher.CurrentDispatcher.BeginInvoke(()=>conversions.Enqueue(format,paths,merge:false));return;
         }
         RunAction(action,paths,payload);
     }
