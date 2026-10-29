@@ -30,6 +30,7 @@ public static class AppLocalization
         ("Choose at least one existing file to convert.","Dönüştürmek için en az bir mevcut dosya seç."),
         ("Unknown output format: {0}","Bilinmeyen çıktı biçimi: {0}"),
         ("Use --convert FORMAT FILE...","--convert BİÇİM DOSYA... biçiminde kullan"),
+        ("Nashi is running as administrator, so Windows blocks drops.\nQuit Nashi and open it normally.","Nashi yönetici olarak çalışıyor, Windows bırakmaları engelliyor.\nNashi’den çıkıp normal şekilde aç."),
     ];
     // Product and key names that keep Latin capitals in Turkish upper case (SHIFT, not SHİFT). Declared before `uppercase`, which uses it.
     public static IReadOnlySet<string> LatinWords{get;}=LoadLatinWords();

@@ -26,6 +26,8 @@ public sealed class GlobalDragController:IDisposable
     [DllImport("user32.dll")]private static extern bool GetCursorPos(out NativePoint point);
     [DllImport("user32.dll")]private static extern bool RegisterHotKey(IntPtr window,int id,uint modifiers,uint key);
     [DllImport("user32.dll")]private static extern bool UnregisterHotKey(IntPtr window,int id);
+    [DllImport("wtsapi32.dll")]private static extern bool WTSRegisterSessionNotification(IntPtr window,int flags);
+    [DllImport("wtsapi32.dll")]private static extern bool WTSUnRegisterSessionNotification(IntPtr window);
     [DllImport("oleacc.dll")]private static extern int AccessibleObjectFromPoint(NativePoint point,[MarshalAs(UnmanagedType.Interface)]out object accessible,[MarshalAs(UnmanagedType.Struct)]out object child);
     private readonly Func<bool> available;private readonly PreferencesStore preferences;private readonly Action<string,IDataObject,string?> dropped;private readonly Action link;private readonly System.Windows.Threading.DispatcherTimer timer;
     private readonly DragGesture gesture=new();private readonly bool registerShortcut;
@@ -54,6 +56,7 @@ public sealed class GlobalDragController:IDisposable
     {
         if(disposed)return;source=window;handle=window.Handle;source.AddHook(Hook);UpdateShortcut();
         mouse=new MouseHookThread(handle);if(!mouse.Installed){mouse.Dispose();mouse=null;polling=true;timer.Start();}
+        WTSRegisterSessionNotification(handle,0); // unlock notifications, see Hook
     }
     /// Re-reads the Enabled preference; called whenever settings change.
     internal void UpdateShortcut(){if(handle==IntPtr.Zero||!registerShortcut)return;var enabled=preferences.Value.Enabled;if(shortcutEnabled==enabled)return;shortcutEnabled=enabled;if(LinkShortcutRegistered)UnregisterHotKey(handle,7701);LinkShortcutRegistered=enabled&&RegisterHotKey(handle,7701,0x4000|0x2|0x4,0x44);}
@@ -67,6 +70,12 @@ public sealed class GlobalDragController:IDisposable
             case MouseHookThread.DownMessage:{var (x,y)=MouseHookThread.Unpack(l.ToInt64());Pressed(x,y);handled=true;break;}
             case MouseHookThread.MoveMessage:mouse?.MoveHandled();if(mouse is not null){var (x,y)=mouse.Latest;Moved(x,y);}handled=true;break;
             case MouseHookThread.UpMessage:Released();handled=true;break;
+            // Windows silently drops a low-level hook that once ran past its timeout (a GC pause, a
+            // throttled CPU, sleep). Besides the periodic refresh, reinstall it whenever the desktop
+            // comes back: resume from sleep, unlock, display change.
+            case 0x0218 when w.ToInt32() is 0x7 or 0x12:mouse?.Refresh();break; // WM_POWERBROADCAST: PBT_APMRESUMESUSPEND / AUTOMATIC
+            case 0x02B1 when w.ToInt32() is 0x8:mouse?.Refresh();break;         // WM_WTSSESSION_CHANGE: WTS_SESSION_UNLOCK
+            case 0x007E:mouse?.Refresh();break;                                 // WM_DISPLAYCHANGE
         }
         return IntPtr.Zero;
     }
@@ -121,7 +130,7 @@ public sealed class GlobalDragController:IDisposable
             }
         }catch(ElementNotAvailableException){}catch(InvalidOperationException){}catch(COMException){}catch(System.Reflection.TargetInvocationException){}catch(MissingMethodException){}return null;
     }
-    public void Dispose(){if(disposed)return;disposed=true;timer.Stop();mouse?.Dispose();mouse=null;wheel?.Close();if(handle!=IntPtr.Zero&&LinkShortcutRegistered)UnregisterHotKey(handle,7701);source?.RemoveHook(Hook);}
+    public void Dispose(){if(disposed)return;disposed=true;timer.Stop();mouse?.Dispose();mouse=null;wheel?.Close();if(handle!=IntPtr.Zero&&LinkShortcutRegistered)UnregisterHotKey(handle,7701);if(handle!=IntPtr.Zero)WTSUnRegisterSessionNotification(handle);source?.RemoveHook(Hook);}
 }
 
 internal sealed class GlobalDropWheel:Window
@@ -158,6 +167,8 @@ internal sealed class GlobalDropWheel:Window
         }
         if(web is null)return [];return web.Kind switch{"youtube"=>[new("download:video","Download Video","↓"),new("download:thumbnail","Download Thumbnail","▣"),new("download:audio","Download Audio","♫")],"instagramPhotos"=>[new("download:photos","Download Images","▣")],"instagramReel"=>[new("download:video","Download Video","↓"),new("download:audio","Download Audio","♫")],"image"=>[new("download:image","Download Image","↓")],_=>[new("download:video","Download Video","↓"),new("download:audio","Download Audio","♫") ]};
     }
+    /// Shown instead of "Keep dragging" when drops cannot arrive: Windows blocks them into an elevated Nashi.
+    internal const string ElevatedHint="Nashi is running as administrator, so Windows blocks drops.\nQuit Nashi and open it normally.";
     private void Highlight(int index){var paths=canvas.Children.OfType<System.Windows.Shapes.Path>().ToArray();for(var n=0;n<paths.Length;n++){paths[n].Fill=Theme.Brush(n==index?"WheelSelected":"WheelPetal");paths[n].Stroke=Theme.Brush(n==index?"WheelSelectedLine":"WheelLine");}}
     private void Build(IReadOnlyList<ToolChoice> tools)
     {
@@ -167,6 +178,6 @@ internal sealed class GlobalDropWheel:Window
             var angle=(WheelPresentation.StartAngle(count)+360d*i/count)*Math.PI/180;var half=(180d/count-1)*Math.PI/180;Point P(double r,double a)=>new(270+r*Math.Cos(a),270+r*Math.Sin(a));var a=angle-half;var b=angle+half;var geometry=new StreamGeometry();using(var g=geometry.Open()){g.BeginFigure(P(108,a),true,true);g.LineTo(P(250,a),true,false);g.ArcTo(P(250,b),new(250,250),0,b-a>Math.PI,SweepDirection.Clockwise,true,false);g.LineTo(P(108,b),true,false);g.ArcTo(P(108,a),new(108,108),0,b-a>Math.PI,SweepDirection.Counterclockwise,true,false);}canvas.Children.Add(new System.Windows.Shapes.Path{Data=geometry,Fill=Theme.Brush("WheelPetal"),Stroke=Theme.Brush("WheelLine")});
             var (stack,location)=WheelPresentation.Caption(tools[i],geometry,angle,half,count);var label=new Border{Child=stack,Width=stack.DesiredSize.Width,Height=stack.DesiredSize.Height,IsHitTestVisible=false};Canvas.SetLeft(label,location.X-label.Width/2);Canvas.SetTop(label,location.Y-label.Height/2);canvas.Children.Add(label);
         }
-        var center=new Border{Width=180,Height=180,IsHitTestVisible=false,Child=L10n.Label(new TextBlock{Text=count==0?"Keep dragging\nDrop a file or link":mode=="convert"?"Convert":mode=="actions"?"File actions":"Tools",TextWrapping=TextWrapping.Wrap,TextAlignment=TextAlignment.Center,VerticalAlignment=VerticalAlignment.Center,FontSize=20,FontWeight=FontWeights.SemiBold,Foreground=Theme.Brush("Ink")} )};Canvas.SetLeft(center,180);Canvas.SetTop(center,180);canvas.Children.Add(center);
+        var center=new Border{Width=180,Height=180,IsHitTestVisible=false,Child=L10n.Label(new TextBlock{Text=count==0?(Elevation.IsElevated?ElevatedHint:"Keep dragging\nDrop a file or link"):mode=="convert"?"Convert":mode=="actions"?"File actions":"Tools",TextWrapping=TextWrapping.Wrap,TextAlignment=TextAlignment.Center,VerticalAlignment=VerticalAlignment.Center,FontSize=count==0&&Elevation.IsElevated?14:20,FontWeight=FontWeights.SemiBold,Foreground=Theme.Brush("Ink")} )};Canvas.SetLeft(center,180);Canvas.SetTop(center,180);canvas.Children.Add(center);
     }
 }

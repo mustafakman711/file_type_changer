@@ -49,6 +49,8 @@ public partial class App:Application
         if(e.Args.Contains("--verify-update-state")){try{ShutdownMode=ShutdownMode.OnExplicitShutdown;SmokeTests.VerifyUpdateState();Shutdown(0);}catch(Exception error){Console.Error.WriteLine(error);Shutdown(1);}return;}
         if(e.Args.Contains("--smoke-test")){IsSmokeTest=true;try{NativeExceptionTrace.Install();SmokeTests.Run();Shutdown(0);}catch(Exception error){Console.Error.WriteLine(error);var directory=Environment.GetEnvironmentVariable("NASHI_SMOKE_DIRECTORY");if(directory is not null){Directory.CreateDirectory(directory);File.WriteAllText(Path.Combine(directory,"error.txt"),error.ToString());}Shutdown(1);}return;}
         if(e.Args.Length==1&&e.Args[0]=="--install-update"){ShutdownMode=ShutdownMode.OnExplicitShutdown;_ = InstallUpdateAsync();return;}
+        // An elevated Nashi cannot receive drops from Explorer (UIPI): start again at the shell's level.
+        if(!ExplorerIntegration.Isolated&&Elevation.IsElevated&&Elevation.ShellIsUnelevated()&&Elevation.RelaunchThroughShell(e.Args)){ShutdownMode=ShutdownMode.OnExplicitShutdown;Shutdown(0);return;}
         LaunchCommand command;
         try{command=LaunchCommand.Parse(e.Args);DeleteSelectionList(e.Args);}
         catch(ArgumentException error){UseSavedLanguage();MessageBox.Show(L10n.Text(error.Message),"Nashi",MessageBoxButton.OK,MessageBoxImage.Information);ShutdownMode=ShutdownMode.OnExplicitShutdown;Shutdown(64);return;}

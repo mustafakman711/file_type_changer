@@ -23,7 +23,7 @@ internal sealed class ResidentHost:IDisposable
     internal PreferencesStore Preferences{get;}
     internal LibraryStore Library{get;}
     private readonly Application app;private readonly HwndSource window;private readonly HeadlessConversion conversions;
-    private readonly DispatcherTimer trim=new(){Interval=TimeSpan.FromSeconds(20)},releaseRetry=new(){Interval=TimeSpan.FromSeconds(2)},wheelMerge=new(){Interval=TimeSpan.FromMilliseconds(350)},updates=new(){Interval=TimeSpan.FromHours(1)},hookRefresh=new(){Interval=TimeSpan.FromMinutes(5)};
+    private readonly DispatcherTimer trim=new(){Interval=TimeSpan.FromSeconds(20)},releaseRetry=new(){Interval=TimeSpan.FromSeconds(2)},wheelMerge=new(){Interval=TimeSpan.FromMilliseconds(350)},updates=new(){Interval=TimeSpan.FromHours(1)},hookRefresh=new(){Interval=TimeSpan.FromMinutes(1)};
     private readonly List<string> wheelPaths=[];
     private TrayHost? tray;private GlobalDragController? drag;private WindowManagement? windowManagement;private MainWindow? main;private WheelWindow? toolsWheel;private WindowsUpdate? update;
     private bool desktop,quitting,checking;private int externalActions;
