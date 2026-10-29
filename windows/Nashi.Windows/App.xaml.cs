@@ -82,7 +82,7 @@ public partial class App:Application
         AllowSetForegroundWindow(-1);
         try{foreach(var message in command.ToMessages())await instance!.Notify(message);Shutdown(0);}catch(Exception error)when(error is IOException or OperationCanceledException or UnauthorizedAccessException){UseSavedLanguage();MessageBox.Show(L10n.Text("Nashi is already running but is still starting. Open it from the system tray or try again in a moment."),"Nashi");Shutdown(1);}
     }
-    protected override void OnExit(ExitEventArgs e){host?.Dispose();Feedback.Stop();PdfRasterDocument.Shutdown();base.OnExit(e);}
+    protected override void OnExit(ExitEventArgs e){host?.Dispose();OfficeAutomation.Shutdown();Feedback.Stop();PdfRasterDocument.Shutdown();base.OnExit(e);}
     private async Task InstallUpdateAsync()
     {
         try

@@ -25,7 +25,7 @@ public sealed class DocumentConversion(OfficeRuntime runtime,Toolchain tools)
             async Task<string> PdfAsync(string from)
             {
                 // Microsoft Office renders its own formats fastest and most faithfully; LibreOffice is the fallback.
-                if(from==input&&OfficeAutomation.For(ext,"pdf") is {} job){var produced=Path.Combine(work,Path.GetFileNameWithoutExtension(input)+".pdf");if(await (microsoft??=new()).TryConvertAsync(job,input,produced,token))return produced;if(File.Exists(produced))File.Delete(produced);}
+                if(from==input&&OfficeAutomation.For(ext,"pdf") is {} job){var produced=Path.Combine(work,Path.GetFileNameWithoutExtension(input)+".pdf");if(await (microsoft??=OfficeAutomation.Acquire()).TryConvertAsync(job,input,produced,token))return produced;if(File.Exists(produced))File.Delete(produced);}
                 return await Require(engine).OfficeAsync(from,"pdf",work,token);
             }
             if(ext=="pages"){if(engine is null||!tools.Ready)throw new InvalidOperationException("Set up office and media tools once to enable native Pages interoperability.");source=await engine.PagesReadAsync(input,work,token);}
@@ -38,7 +38,7 @@ public sealed class DocumentConversion(OfficeRuntime runtime,Toolchain tools)
             if(ext=="pdf"&&format=="pptx")
             {var output=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+".pptx");await PdfSlides.WriteAsync(input,output,options.Dpi,options.Password,token);outputs.Add(output);progress?.Report(new((i+1d)/inputs.Count*.98,"Saving document…"));continue;}
             if(ext=="pdf"&&format=="docx"&&options.Layout!="preserve"&&options.Password.Length==0&&OfficeAutomation.For(ext,format) is {} reflow)
-            {var output=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+".docx");if(await (microsoft??=new()).TryConvertAsync(reflow,input,output,token)){outputs.Add(output);progress?.Report(new((i+1d)/inputs.Count*.98,"Saving document…"));continue;}if(File.Exists(output))File.Delete(output);}
+            {var output=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+".docx");if(await (microsoft??=OfficeAutomation.Acquire()).TryConvertAsync(reflow,input,output,token)){outputs.Add(output);progress?.Report(new((i+1d)/inputs.Count*.98,"Saving document…"));continue;}if(File.Exists(output))File.Delete(output);}
             if(ext=="pdf"&&format=="epub"&&options.EpubLayout=="fixed")
             {var output=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+".epub");EpubFixed(await NativePdf.RenderAsync(input,options.Dpi,token,options.Password),output,Path.GetFileNameWithoutExtension(input));outputs.Add(output);continue;}
             if(ext=="pdf"&&format is not ("png" or "jpg" or "pptx"))
@@ -64,7 +64,7 @@ public sealed class DocumentConversion(OfficeRuntime runtime,Toolchain tools)
             var converted=format=="pdf"?await PdfAsync(source):await Require(engine).OfficeAsync(source,format,work,token);var target=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+"."+format);File.Move(converted,target);outputs.Add(target);progress?.Report(new((i+1d)/inputs.Count*.98,"Saving document…"));
         }
         return tx.Publish(outputs,token);
-        }finally{microsoft?.Dispose();}
+        }finally{microsoft?.Release();}
     }
     private static OfficeDocuments Require(OfficeDocuments? engine)=>engine??throw new InvalidOperationException("Choose Set up office tools once to enable document, slide and spreadsheet conversions.");
     private static async Task<string> PdfPreservedHtml(string input,string work,int dpi,CancellationToken token,string password="")

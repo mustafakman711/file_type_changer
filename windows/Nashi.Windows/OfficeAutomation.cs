@@ -13,16 +13,69 @@ namespace Nashi.Windows;
 internal sealed class OfficeAutomation:IDisposable
 {
     internal enum Job{WordPdf,PowerPointPdf,ExcelPdf,WordDocx}
-    private sealed record Work(Job Job,string Input,string Output,TaskCompletionSource Done);
+    private sealed record Work(Job Job,string Input,string Output,TaskCompletionSource Done,bool StartOnly=false);
     private sealed class Instance(dynamic application,int? process,bool started){public dynamic Application=application;public int? Process=process;public bool Started=started;public bool Broken;}
     private readonly BlockingCollection<Work> queue=new();private readonly Dictionary<string,Instance> instances=[];private readonly Thread thread;private volatile bool unusable;
     // A dummy password stops Office from showing a password prompt for
     // protected files; those then fail fast and fall back.
     private const string NoPassword="\u0001nashi-no-password";
 
-    internal OfficeAutomation()
+    private OfficeAutomation()
     {
         thread=new Thread(Loop){IsBackground=true,Name="Nashi Office automation"};thread.SetApartmentState(ApartmentState.STA);thread.Start();
+    }
+
+    // ---- shared, warm instance ----
+    // Starting Word or PowerPoint costs seconds and quitting it costs more, so
+    // conversions share one automation thread whose hidden Office instances stay
+    // open for a few minutes after the last job. A job therefore never waits for
+    // Office to quit, and back-to-back conversions skip the cold start.
+    internal static TimeSpan KeepWarm{get;set;}=TimeSpan.FromMinutes(3);
+    private static readonly object sharing=new();private static OfficeAutomation? shared;
+    private int users;private Timer? idle;
+    /// The shared instance; pair every call with Release().
+    internal static OfficeAutomation Acquire()
+    {
+        lock(sharing)
+        {
+            if(shared is null||shared.unusable)shared=new();
+            shared.users++;shared.idle?.Change(Timeout.Infinite,Timeout.Infinite);return shared;
+        }
+    }
+    internal void Release()
+    {
+        var retire=false;
+        lock(sharing)
+        {
+            if(--users>0)return;
+            if(!ReferenceEquals(shared,this)||unusable){if(ReferenceEquals(shared,this))shared=null;retire=true;}
+            else{idle??=new Timer(_=>Expire());idle.Change(KeepWarm,Timeout.InfiniteTimeSpan);}
+        }
+        if(retire)_ = Task.Run(Dispose);
+    }
+    private void Expire()
+    {
+        lock(sharing){if(users>0||!ReferenceEquals(shared,this))return;shared=null;}
+        Dispose();
+    }
+    /// Quits the warm Office instances now (Nashi is exiting).
+    internal static void Shutdown()
+    {
+        OfficeAutomation? current;lock(sharing){current=shared;shared=null;}
+        current?.Dispose();
+    }
+    /// Starts the Office application a conversion of these files will need
+    /// while the request is still being merged and prepared, so the job finds
+    /// it running. Does nothing for other conversions.
+    internal static void Prewarm(IEnumerable<string> inputs,string format)
+    {
+        foreach(var application in inputs.Select(p=>For(Nashi.Core.FeatureCatalog.Extension(p),format)).OfType<Job>().DistinctBy(Name).ToArray())
+        {
+            var automation=Acquire();var started=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            try{automation.queue.Add(new Work(application,"","",started,StartOnly:true));}catch(InvalidOperationException){started.TrySetResult();}
+            // A start stuck on a hidden prompt still lets the instance expire later.
+            _ = Task.WhenAny(started.Task,Task.Delay(TimeSpan.FromSeconds(90))).ContinueWith(_=>automation.Release(),TaskScheduler.Default);
+        }
     }
 
     internal static Job? For(string extension,string format)=>(extension,format) switch
@@ -76,11 +129,11 @@ internal sealed class OfficeAutomation:IDisposable
     {
         foreach(var work in queue.GetConsumingEnumerable())
         {
-            try{Run(work);work.Done.TrySetResult();}
+            try{if(work.StartOnly)Start(Name(work.Job));else RunWarm(work);work.Done.TrySetResult();}
             catch(Exception error)
             {
                 // A failed call may leave the instance unusable; start fresh next time.
-                lock(instances)if(instances.TryGetValue(Name(work.Job),out var instance)&&(instance.Broken||error is COMException{HResult:unchecked((int)0x800706BA) or unchecked((int)0x80010108) or unchecked((int)0x800706BE)})){instances.Remove(Name(work.Job));}
+                lock(instances)if(instances.TryGetValue(Name(work.Job),out var instance)&&(instance.Broken||Disconnected(error))){instances.Remove(Name(work.Job));}
                 work.Done.TrySetException(error);
             }
         }
@@ -103,6 +156,16 @@ internal sealed class OfficeAutomation:IDisposable
         var instance=new Instance(app,id,started);lock(instances)instances[application]=instance;return instance;
     }
 
+    private static bool Disconnected(Exception error)=>error is COMException{HResult:unchecked((int)0x800706BA) or unchecked((int)0x80010108) or unchecked((int)0x800706BE)} or InvalidComObjectException;
+    /// A warm instance may have gone away since the last job (the user quit the
+    /// PowerPoint Nashi started, Office crashed): retry once on a fresh one
+    /// instead of falling back to the slower LibreOffice.
+    private void RunWarm(Work work)
+    {
+        bool reused;lock(instances)reused=instances.TryGetValue(Name(work.Job),out var cached)&&!cached.Broken;
+        try{Run(work);}
+        catch(Exception error)when(reused&&Disconnected(error)){lock(instances)instances.Remove(Name(work.Job));Run(work);}
+    }
     private void Run(Work work)
     {
         var application=Name(work.Job);var instance=Start(application);dynamic app=instance.Application;
@@ -179,8 +242,10 @@ internal sealed class OfficeAutomation:IDisposable
     [DllImport("user32.dll")]private static extern bool IsWindowVisible(nint window);
     [DllImport("user32.dll")]private static extern uint GetWindowThreadProcessId(nint window,out int process);
 
+    private int disposed;
     public void Dispose()
     {
+        if(Interlocked.Exchange(ref disposed,1)!=0)return;idle?.Dispose();
         queue.CompleteAdding();
         // Give Office a moment to quit cleanly; a stuck call is abandoned.
         if(!thread.Join(TimeSpan.FromSeconds(unusable?0:20)))foreach(var application in new[]{"Word","PowerPoint","Excel"})Abandon(application);
