@@ -8,17 +8,22 @@ using System.Text.RegularExpressions;
 using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 namespace Nashi.Core;
 public sealed record DocumentOptions(int Dpi=144,string Layout="editable",string EpubLayout="reflowable",string Password="");
-public sealed partial class OfficeDocuments(string office,string deno,string assets)
+public sealed partial class OfficeDocuments(string office,string deno,string assets,string? warmProfile=null)
 {
     private static string Escape(string value)=>WebUtility.HtmlEncode(value);
     public async Task<string> OfficeAsync(string input,string format,string outputDirectory,CancellationToken token)
     {
         Directory.CreateDirectory(outputDirectory);// LibreOffice creates deeply nested profile/cache paths. Keep its job short
         // even when the destination is an already nested export transaction.
-        var job=Path.Combine(Path.GetTempPath(),"NashiOffice-"+Guid.NewGuid().ToString("N"));var profile=Path.Combine(job,"profile");var rendered=Path.Combine(job,"out");Directory.CreateDirectory(Path.Combine(profile,"user"));Directory.CreateDirectory(rendered);
+        var job=Path.Combine(Path.GetTempPath(),"NashiOffice-"+Guid.NewGuid().ToString("N"));var rendered=Path.Combine(job,"out");Directory.CreateDirectory(rendered);
+        // LibreOffice spends most of a cold start building its user profile. A
+        // Nashi-only profile is kept warm and leased to one conversion at a
+        // time; a concurrent conversion gets a throwaway profile as before.
+        var lease=warmProfile is null?null:Lease(warmProfile);var profile=lease is null?Path.Combine(job,"profile"):warmProfile!;var succeeded=false;
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(profile,"user","registrymodifications.xcu"),"<?xml version=\"1.0\"?><oor:items xmlns:oor=\"http://openoffice.org/2001/registry\"><item oor:path=\"/org.openoffice.Office.Common/Security/Scripting\"><prop oor:name=\"MacroSecurityLevel\" oor:op=\"fuse\"><value>3</value></prop></item><item oor:path=\"/org.openoffice.Office.Common/Load\"><prop oor:name=\"UpdateLinkMode\" oor:op=\"fuse\"><value>0</value></prop></item></oor:items>",token);
+            var settings=Path.Combine(profile,"user","registrymodifications.xcu");
+            if(lease is null||!Seeded(settings)){if(lease is not null)ResetProfile(profile);Directory.CreateDirectory(Path.Combine(profile,"user"));await File.WriteAllTextAsync(settings,ProfileSettings,token);}
             var original=Path.GetFullPath(input);var ext=FeatureCatalog.Extension(input);
             if(new[]{"docx","doc","pptx","ppt","xlsx","xls","ods","odt","rtf","pdf","epub"}.Contains(ext)){input=Path.Combine(job,"Source."+ext);File.Copy(original,input);}
             var spreadsheet=new[]{"csv","tsv","xls","xlsx","ods"}.Contains(ext);var slides=new[]{"ppt","pptx"}.Contains(ext);
@@ -28,9 +33,31 @@ public sealed partial class OfficeDocuments(string office,string deno,string ass
             if(ext=="html"&&format is "xlsx" or "ods" or "csv" or "tsv")args.Add("--infilter=HTML (StarCalc)");
             if(ext=="pdf"&&format=="pptx")args.Add("--infilter=impress_pdf_import");
             args.AddRange(["--convert-to",filter,"--outdir",rendered,Path.GetFullPath(input)]);var result=await ProcessRunner.RunAsync(office,args,token);
-            var output=Path.Combine(rendered,Path.GetFileNameWithoutExtension(input)+"."+(format=="tsv"?"csv":format));if(!File.Exists(output)||new FileInfo(output).Length==0)throw new IOException("Office could not convert this document to "+format.ToUpperInvariant()+". "+(result.Error+" "+result.Output).Trim());var destination=SafePaths.Unique(outputDirectory,Path.GetFileNameWithoutExtension(original)+"."+(format=="tsv"?"csv":format));File.Move(output,destination);return destination;
+            var output=Path.Combine(rendered,Path.GetFileNameWithoutExtension(input)+"."+(format=="tsv"?"csv":format));if(!File.Exists(output)||new FileInfo(output).Length==0)throw new IOException("Office could not convert this document to "+format.ToUpperInvariant()+". "+(result.Error+" "+result.Output).Trim());var destination=SafePaths.Unique(outputDirectory,Path.GetFileNameWithoutExtension(original)+"."+(format=="tsv"?"csv":format));File.Move(output,destination);succeeded=true;return destination;
         }
-        finally{if(Directory.Exists(job))Directory.Delete(job,true);}
+        finally
+        {
+            // A failed run may leave a damaged profile; the next run rebuilds it.
+            if(lease is not null){if(!succeeded)ResetProfile(profile);lease.Dispose();}
+            if(Directory.Exists(job))Directory.Delete(job,true);
+        }
+    }
+    private const string ProfileSettings="<?xml version=\"1.0\"?><oor:items xmlns:oor=\"http://openoffice.org/2001/registry\"><item oor:path=\"/org.openoffice.Office.Common/Security/Scripting\"><prop oor:name=\"MacroSecurityLevel\" oor:op=\"fuse\"><value>3</value></prop></item><item oor:path=\"/org.openoffice.Office.Common/History\"><prop oor:name=\"PickListSize\" oor:op=\"fuse\"><value>0</value></prop></item><item oor:path=\"/org.openoffice.Office.Common/Load\"><prop oor:name=\"UpdateLinkMode\" oor:op=\"fuse\"><value>0</value></prop></item></oor:items>";
+    // The warm profile is reused only while LibreOffice still has Nashi's
+    // hardening: macros disabled, linked content never updated, no recent list.
+    private static bool Seeded(string settings)
+    {
+        try{var text=File.ReadAllText(settings);return text.Contains("<prop oor:name=\"MacroSecurityLevel\" oor:op=\"fuse\"><value>3</value></prop>",StringComparison.Ordinal)&&text.Contains("<prop oor:name=\"PickListSize\" oor:op=\"fuse\"><value>0</value></prop>",StringComparison.Ordinal);}
+        catch(Exception error)when(error is IOException or UnauthorizedAccessException){return false;}
+    }
+    private static FileStream? Lease(string profile)
+    {
+        try{Directory.CreateDirectory(profile);if((File.GetAttributes(profile)&FileAttributes.ReparsePoint)!=0)return null;return new FileStream(Path.Combine(profile,".nashi-lease"),FileMode.OpenOrCreate,FileAccess.ReadWrite,FileShare.None,1,FileOptions.DeleteOnClose);}
+        catch(Exception error)when(error is IOException or UnauthorizedAccessException){return null;}
+    }
+    private static void ResetProfile(string profile)
+    {
+        try{var user=Path.Combine(profile,"user");if(Directory.Exists(user))Directory.Delete(user,true);}catch(Exception error)when(error is IOException or UnauthorizedAccessException){}
     }
     public async Task<string> PagesReadAsync(string input,string work,CancellationToken token)
     {

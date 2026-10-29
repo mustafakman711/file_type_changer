@@ -5,7 +5,7 @@ namespace Nashi.Windows;
 
 // CPU-only PDF rasterization. Keep native PDF objects and their pinned source
 // bytes together, and serialize PDFium (its public API is not thread-safe).
-internal sealed class PdfRasterDocument:IDisposable
+internal sealed partial class PdfRasterDocument:IDisposable
 {
     private static readonly object gate=new();private static bool initialized;private static int documents;
     private nint document;private GCHandle source;private PdfFormPreview? form;
@@ -63,7 +63,7 @@ internal sealed class PdfRasterDocument:IDisposable
     public void Dispose(){lock(gate){if(document==0)return;form?.Dispose();form=null;Native.FPDF_CloseDocument(document);document=0;documents--;if(source.IsAllocated)source.Free();}GC.SuppressFinalize(this);}
     ~PdfRasterDocument(){Dispose();}
     internal static void Shutdown(){lock(gate){if(initialized&&documents==0){Native.FPDF_DestroyLibrary();initialized=false;}}}
-    private static class Native
+    private static partial class Native
     {
         [DllImport("pdfium",CallingConvention=CallingConvention.Winapi)]internal static extern void FPDF_InitLibrary();
         [DllImport("pdfium",CallingConvention=CallingConvention.Winapi)]internal static extern void FPDF_DestroyLibrary();

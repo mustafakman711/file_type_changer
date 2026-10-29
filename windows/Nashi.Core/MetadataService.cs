@@ -20,11 +20,28 @@ public sealed class MetadataService(string root)
     {
         var result=await ProcessRunner.RunAsync(Executable??throw new InvalidOperationException("Set up metadata tools once."),["-json","-G","-s","-charset","filename=UTF8","--",Path.GetFullPath(input)],token);using var json=JsonDocument.Parse(result.Output);return json.RootElement[0].EnumerateObject().ToDictionary(p=>p.Name,p=>p.Value.ToString());
     }
-    public async Task CopyImageTagsAsync(string source,string output,CancellationToken token)
+    public Task CopyImageTagsAsync(string source,string output,CancellationToken token)=>CopyImageTagsAsync([(source,output)],token);
+    /// Copies tags for a whole batch in one ExifTool process (one command per
+    /// file, separated by -execute): ExifTool's start-up dominates per file.
+    public async Task CopyImageTagsAsync(IReadOnlyList<(string Source,string Output)> files,CancellationToken token)
     {
+        if(files.Count==0)return;var executable=Executable??throw new InvalidOperationException("Metadata tools are not ready.");
         // Pixels are already oriented and converted to sRGB. Do not reattach a
         // stale orientation, source ICC profile, preview or image dimensions.
-        await ProcessRunner.RunAsync(Executable??throw new InvalidOperationException("Metadata tools are not ready."),["-overwrite_original","-charset","filename=UTF8","-tagsFromFile",Path.GetFullPath(source),"-all:all","--ICC_Profile","--Orientation","--ThumbnailImage","--PreviewImage","--JpgFromRaw","--ImageWidth","--ImageHeight","--ExifImageWidth","--ExifImageHeight","-Orientation=1","-ColorSpace=sRGB","--",Path.GetFullPath(output)],token);
+        static string[] Arguments(string source,string output,bool listed=false)=>["-overwrite_original","-charset","filename=UTF8","-tagsFromFile",Path.GetFullPath(source),"-all:all","--ICC_Profile","--Orientation","--ThumbnailImage","--PreviewImage","--JpgFromRaw","--ImageWidth","--ImageHeight","--ExifImageWidth","--ExifImageHeight","-Orientation=1","-ColorSpace=sRGB",..(listed?Array.Empty<string>():["--"]),Path.GetFullPath(output)];
+        // An argument file holds one argument per line.
+        if(files.Any(f=>(Path.GetFullPath(f.Source)+Path.GetFullPath(f.Output)).Any(char.IsControl))){foreach(var file in files)await ProcessRunner.RunAsync(executable,Arguments(file.Source,file.Output),token);return;}
+        // In an argument file "--" would end options for every later command;
+        // full paths never start with "-", so it is not needed there.
+        var list=Path.Combine(Path.GetTempPath(),"Nashi-exif-"+Guid.NewGuid().ToString("N")+".args");
+        try
+        {
+            await File.WriteAllLinesAsync(list,files.SelectMany((f,i)=>i==0?Arguments(f.Source,f.Output,true):["-execute",..Arguments(f.Source,f.Output,true)]),new System.Text.UTF8Encoding(false),token);
+            // Like one process per file, any failed file fails the batch.
+            var result=await ProcessRunner.RunAsync(executable,["-charset","filename=UTF8","-@",list],token);
+            if(result.Error.Contains("Error:",StringComparison.Ordinal))throw new IOException(result.Error.Trim());
+        }
+        finally{if(File.Exists(list))File.Delete(list);}
     }
     public async Task<IReadOnlyList<string>> WriteAsync(IReadOnlyList<string> inputs,string destination,bool removeAll,IReadOnlyDictionary<string,string>? updates=null,IReadOnlyList<string>? removals=null,IProgress<OperationProgress>? progress=null,CancellationToken token=default)
     {

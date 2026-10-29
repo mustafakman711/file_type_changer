@@ -58,6 +58,16 @@ try
         catch (OperationCanceledException) { checks++; }
     }
     Check(!Directory.EnumerateDirectories(root).Any(), "Staging files survived cancellation");
+    var deck=Path.Combine(root,"Slides.pptx");var pixel=Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=");
+    PptxWriter.Write(deck,[new SlidePage(960,540,pixel,"png",[new SlideTextLine(40,100,300,[new SlideTextRun("Türkçe <&> metin","Arial",24,true,false,0xFF336699,.5),new SlideTextRun(" yarı saydam\u0001","Calibri",12,false,true,0x80000000)],.95)]),new SlidePage(595,842,pixel,"jpeg",[])],"Deck");
+    using(var package=System.IO.Compression.ZipFile.OpenRead(deck))
+    {
+        foreach(var part in package.Entries.Where(e=>e.FullName.EndsWith(".xml",StringComparison.Ordinal)||e.FullName.EndsWith(".rels",StringComparison.Ordinal))){using var stream=part.Open();System.Xml.Linq.XDocument.Load(stream);}
+        Check(new[]{"[Content_Types].xml","ppt/presentation.xml","ppt/slides/slide1.xml","ppt/slides/slide2.xml","ppt/media/page1.png","ppt/media/page2.jpeg","ppt/slideLayouts/slideLayout1.xml","ppt/theme/theme1.xml"}.All(name=>package.GetEntry(name) is not null),"Slide package is missing parts");
+        string Part(string name){using var reader=new StreamReader(package.GetEntry(name)!.Open());return reader.ReadToEnd();}
+        var slide=Part("ppt/slides/slide1.xml");Check(slide.Contains("Türkçe &lt;&amp;&gt; metin",StringComparison.Ordinal)&&slide.Contains("sz=\"2400\" b=\"1\"",StringComparison.Ordinal)&&slide.Contains("spc=\"50\"",StringComparison.Ordinal)&&slide.Contains("<a:alpha val=\"50196\"/>",StringComparison.Ordinal),"Editable slide text lost its content or style");
+        Check(Part("ppt/presentation.xml").Contains("<p:sldSz cx=\"12192000\" cy=\"6858000\"/>",StringComparison.Ordinal),"Slide size does not match the PDF page");
+    }
     var libraryDirectory=Path.Combine(root,"LibraryData");var library=new LibraryStore(libraryDirectory);
     var unicodeFile=Path.Combine(root,"Türkçe 🍐.txt");File.WriteAllText(unicodeFile,"original");library.Record("Pasted text",[unicodeFile]);library.SetAppearance("dark");
     library.SetWindowManagement(false);
