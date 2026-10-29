@@ -9,7 +9,8 @@ internal sealed class SingleInstance:IDisposable
     internal bool Primary{get;}
     internal SingleInstance(string? testName=null)
     {
-        var name=testName??"Nashi.Desktop.v1."+Process.GetCurrentProcess().SessionId;pipe=name;mutex=new(false,"Local\\"+name);try{Primary=mutex.WaitOne(0);}catch(AbandonedMutexException){Primary=true;}
+        // NashiShell.exe (the Explorer menu) derives the same name to reach the resident instance.
+        var name=testName??"Nashi.Desktop.v1."+Process.GetCurrentProcess().SessionId+(ExplorerIntegration.Isolated?".isolated":"");pipe=name;mutex=new(false,"Local\\"+name);try{Primary=mutex.WaitOne(0);}catch(AbandonedMutexException){Primary=true;}
     }
     internal void Start(Action<string[]> receive)
     {

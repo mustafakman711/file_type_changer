@@ -61,6 +61,7 @@ internal sealed class FileArtworkCache
         finally{lock(gate)flights.Remove(path);}
     }
     internal int CachedCount{get{lock(gate)return cache.Count;}}
+    internal void Clear(){lock(gate)cache.Clear();}
 }
 
 internal static class FileArtwork
@@ -81,6 +82,8 @@ internal static class FileArtwork
     }
     private static readonly DependencyProperty BindingProperty=DependencyProperty.RegisterAttached("Binding",typeof(ArtworkBinding),typeof(FileArtwork));
     internal static void Bind(Image image,string path)=>image.SetValue(PathProperty,path);
+    /// Drops cached icons once the main window is released to the tray.
+    internal static void ReleaseCache()=>cache.Clear();
     internal static void BindForTest(Image image,string path,FileArtworkCache isolatedCache)
     {image.SetValue(BindingProperty,new ArtworkBinding(image,isolatedCache));Bind(image,path);}
     private static void PathChanged(DependencyObject value,DependencyPropertyChangedEventArgs args)

@@ -38,10 +38,16 @@ public sealed partial class MainWindow:Window
     internal bool LibraryVisible=>libraryPage.Visibility==Visibility.Visible;
     internal TextBox SearchField=>search;
     internal TextBox LinkField=>link;
-    public MainWindow(string[]? initial=null,LibraryStore? library=null,bool checkForUpdates=true,bool offerToolSetup=true)
+    private readonly ResidentHost? host;
+    /// With a resident host the tray icon, drag gesture and automatic update
+    /// checks live in the host; this window is created on demand and released
+    /// when it goes back to the tray.
+    internal MainWindow(string[]? initial,LibraryStore? library,bool checkForUpdates,bool offerToolSetup,PreferencesStore? preferences,ResidentHost? host):this(initial,library,checkForUpdates,offerToolSetup,preferences,host,0){}
+    public MainWindow(string[]? initial=null,LibraryStore? library=null,bool checkForUpdates=true,bool offerToolSetup=true):this(initial,library,checkForUpdates,offerToolSetup,null,null,0){}
+    private MainWindow(string[]? initial,LibraryStore? library,bool checkForUpdates,bool offerToolSetup,PreferencesStore? sharedPreferences,ResidentHost? host,int _)
     {
-        monitorToolSetup=checkForUpdates;
-        this.library=library??new LibraryStore();preferences=new(this.library.DirectoryPath);ApplyPreferences();Theme.Apply(this.library.Appearance);Theme.Attach(this);
+        monitorToolSetup=checkForUpdates;this.host=host;
+        this.library=library??new LibraryStore();preferences=sharedPreferences??new(this.library.DirectoryPath);ApplyPreferences();Theme.Apply(this.library.Appearance);Theme.Attach(this);
         Title="Nashi";Width=820;Height=780;MinWidth=700;MinHeight=580;WindowStartupLocation=WindowStartupLocation.CenterScreen;AllowDrop=true;
         Icon=BitmapFrame.Create(new Uri("pack://application:,,,/Assets/NashiIcon.png"));
         var root=new DockPanel{Margin=new(28,18,28,18)};Content=root;AddHandler(UIElement.PreviewMouseWheelEvent,new MouseWheelEventHandler(RoutePageMouseWheel),true);
@@ -85,8 +91,11 @@ public sealed partial class MainWindow:Window
         {
             Loaded+=(_,_)=>SetupDesktop();Closed+=(_,_)=>globalDrag?.Dispose();
             if(offerToolSetup)Loaded+=(_,_)=>Dispatcher.BeginInvoke(OfferFirstRunTools);
-            Loaded+=async(_,_)=>{if(preferences.Value.AutomaticUpdateChecks)await CheckUpdatesAsync(false);};
-            var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromHours(1)};timer.Tick+=async(_,_)=>{if(preferences.Value.AutomaticUpdateChecks)await CheckUpdatesAsync(false);};Closed+=(_,_)=>timer.Stop();timer.Start();
+            if(host is null)
+            {
+                Loaded+=async(_,_)=>{if(preferences.Value.AutomaticUpdateChecks)await CheckUpdatesAsync(false);};
+                var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromHours(1)};timer.Tick+=async(_,_)=>{if(preferences.Value.AutomaticUpdateChecks)await CheckUpdatesAsync(false);};Closed+=(_,_)=>timer.Stop();timer.Start();
+            }
         }
     }
     private void RoutePageMouseWheel(object sender,MouseWheelEventArgs e)
@@ -233,7 +242,7 @@ public sealed partial class MainWindow:Window
                     await ProcessRunner.RunAsync(tools.Executable("ffmpeg"),["-v","error","-i",input,"-frames:v","1",temporary]);preview=ImageEngine.Load(temporary);
                 }
             }
-            SetBusy(false);var editor=new ToolEditor(this,choice.Id,choice.Title,input,info,preview,selected,choice.Id=="convert"?FeatureCatalog.Formats(selected):null);editor.ConfigureProfiles(preferences,requestedFormat);editor.ConfigureMediaRuntime(tools);var accepted=requestedFormat is not null&&editor.AcceptDefaults(requestedFormat)||editor.ShowDialog()==true;if(temporary is not null)File.Delete(temporary);if(!accepted)return;
+            SetBusy(false);var editor=new ToolEditor(this,choice.Id,choice.Title,input,info,preview,selected,choice.Id=="convert"?FeatureCatalog.Formats(selected):null);editor.ConfigureProfiles(preferences,requestedFormat);editor.ConfigureMediaRuntime(tools);var accepted=requestedFormat is not null&&editor.AcceptDefaults(requestedFormat)||editor.ShowDialog()==true;editor.Discard();if(temporary is not null)File.Delete(temporary);if(!accepted)return;
             var inputs=choice.Id is "cropVideo" or "redactVideo" or "annotate"?new[]{input}:editor.OrderedInputs;
             if(imageSelection)await RunAsync(async(destination,p,t)=>
             {
@@ -283,7 +292,7 @@ public sealed partial class MainWindow:Window
         try{await tools.InstallAsync(new Progress<OperationProgress>(toast.Update),cancellation.Token);toast.Close();L10n.SetText(status,"Media tools ready. You can edit, convert and download media.");}
         catch(OperationCanceledException){toast.Close();L10n.SetText(status,"Setup cancelled.");}catch(Exception error){toast.Close();MessageBox.Show(this,L10n.Text(error.Message),L10n.Text("Setup couldn’t finish"));}finally{SetBusy(false);}
     }
-    internal void OfferUpdate(WindowsUpdate candidate){update=candidate;updateButton.Content="Update to "+candidate.Version;if(updateBanner is not null)updateBanner.Visibility=Visibility.Visible;tray?.UpdateAvailable(candidate.Version);}
+    internal void OfferUpdate(WindowsUpdate candidate){update=candidate;updateButton.Content="Update to "+candidate.Version;if(updateBanner is not null)updateBanner.Visibility=Visibility.Visible;tray?.UpdateAvailable(candidate.Version);host?.UpdateFound(candidate);}
     private async Task CheckUpdatesAsync(bool user)
     {
         if(busy||checking)return;checking=true;updateButton.IsEnabled=false;if(user)L10n.SetText(status,"Checking for updates…");try

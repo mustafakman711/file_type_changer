@@ -1,10 +1,10 @@
 using System.Windows;
+using Nashi.Core;
 namespace Nashi.Windows;
 public partial class App:Application
 {
     private SingleInstance? instance;
     internal static bool IsSmokeTest{get;private set;}
-    private WindowManagement? windowManagement;
     protected override void OnStartup(StartupEventArgs e)
     {
         if(Environment.GetEnvironmentVariable("NASHI_SMOKE_DIRECTORY") is {} diagnostics)
@@ -49,22 +49,40 @@ public partial class App:Application
         if(e.Args.Contains("--verify-update-state")){try{ShutdownMode=ShutdownMode.OnExplicitShutdown;SmokeTests.VerifyUpdateState();Shutdown(0);}catch(Exception error){Console.Error.WriteLine(error);Shutdown(1);}return;}
         if(e.Args.Contains("--smoke-test")){IsSmokeTest=true;try{NativeExceptionTrace.Install();SmokeTests.Run();Shutdown(0);}catch(Exception error){Console.Error.WriteLine(error);var directory=Environment.GetEnvironmentVariable("NASHI_SMOKE_DIRECTORY");if(directory is not null){Directory.CreateDirectory(directory);File.WriteAllText(Path.Combine(directory,"error.txt"),error.ToString());}Shutdown(1);}return;}
         if(e.Args.Length==1&&e.Args[0]=="--install-update"){ShutdownMode=ShutdownMode.OnExplicitShutdown;_ = InstallUpdateAsync();return;}
-        instance=new SingleInstance();Exit+=(_,_)=>instance.Dispose();var paths=e.Args.Where(p=>File.Exists(p)||Directory.Exists(p)).ToArray();
-        if(!instance.Primary){ShutdownMode=ShutdownMode.OnExplicitShutdown;_ = ForwardAndExit(paths);return;}
-        var window=new MainWindow(paths,offerToolSetup:!e.Args.Contains("--background"));instance.Start(incoming=>Dispatcher.BeginInvoke(()=>window.AcceptLaunch(incoming)));window.Show();
-        windowManagement=new WindowManagement(notice:message=>MessageBox.Show(L10n.Text(message),L10n.Text("Window arrangement"),MessageBoxButton.OK,MessageBoxImage.Information),isEnabled:()=>window.WindowManagementEnabled);
+        LaunchCommand command;
+        try{command=LaunchCommand.Parse(e.Args);DeleteSelectionList(e.Args);}
+        catch(ArgumentException error){UseSavedLanguage();MessageBox.Show(L10n.Text(error.Message),"Nashi",MessageBoxButton.OK,MessageBoxImage.Information);ShutdownMode=ShutdownMode.OnExplicitShutdown;Shutdown(64);return;}
+        instance=new SingleInstance();Exit+=(_,_)=>instance.Dispose();ShutdownMode=ShutdownMode.OnExplicitShutdown;
+        if(!instance.Primary){_ = ForwardAndExit(command);return;}
+        // Light resident mode: tray, gesture and Explorer requests first; the
+        // main window, Library and media engines only when they are needed.
+        host=new ResidentHost(this);var resident=host;
+        instance.Start(message=>Dispatcher.BeginInvoke(()=>resident.Handle(LaunchCommand.FromMessage(message))));
+        resident.Handle(command);
     }
+    private ResidentHost? host;
+    /// NashiShell.exe passes very large Explorer selections as a temporary list.
+    private static void DeleteSelectionList(string[] args)
+    {
+        var index=Array.FindIndex(args,a=>a.Equals("--files-from",StringComparison.OrdinalIgnoreCase));if(index<0||index+1>=args.Length)return;
+        try{var list=Path.GetFullPath(args[index+1]);if(Path.GetFileName(list).StartsWith("Nashi-files-",StringComparison.Ordinal)&&string.Equals(Path.GetDirectoryName(list)+Path.DirectorySeparatorChar,Path.GetTempPath(),StringComparison.OrdinalIgnoreCase))File.Delete(list);}
+        catch(Exception error)when(error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException){}
+    }
+    [System.Runtime.InteropServices.DllImport("user32.dll")]private static extern bool AllowSetForegroundWindow(int process);
     internal static void UseSavedLanguage(Func<string>? readLanguage=null)
     {
         L10n.Language="en";
         try{L10n.Language=readLanguage is null?new Nashi.Core.PreferencesStore(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Nashi")).Value.Language:readLanguage();}
         catch(Exception error)when(error is IOException or UnauthorizedAccessException or System.Security.SecurityException){/* Preserve the original error dialog in English. */}
     }
-    private async Task ForwardAndExit(string[] paths)
+    private async Task ForwardAndExit(LaunchCommand command)
     {
-        try{await instance!.Notify(paths);Shutdown(0);}catch(Exception error)when(error is IOException or OperationCanceledException or UnauthorizedAccessException){UseSavedLanguage();MessageBox.Show(L10n.Text("Nashi is already running but is still starting. Open it from the system tray or try again in a moment."),"Nashi");Shutdown(1);}
+        // Explorer gave this process the right to take the foreground; pass it
+        // on so the resident instance can activate the tools wheel or window.
+        AllowSetForegroundWindow(-1);
+        try{foreach(var message in command.ToMessages())await instance!.Notify(message);Shutdown(0);}catch(Exception error)when(error is IOException or OperationCanceledException or UnauthorizedAccessException){UseSavedLanguage();MessageBox.Show(L10n.Text("Nashi is already running but is still starting. Open it from the system tray or try again in a moment."),"Nashi");Shutdown(1);}
     }
-    protected override void OnExit(ExitEventArgs e){windowManagement?.Dispose();Feedback.Stop();PdfRasterDocument.Shutdown();base.OnExit(e);}
+    protected override void OnExit(ExitEventArgs e){host?.Dispose();Feedback.Stop();PdfRasterDocument.Shutdown();base.OnExit(e);}
     private async Task InstallUpdateAsync()
     {
         try

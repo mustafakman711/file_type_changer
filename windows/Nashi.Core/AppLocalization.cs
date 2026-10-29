@@ -15,8 +15,22 @@ public static class AppLocalization
     private static Dictionary<string,string> Load()
     {
         using var stream=typeof(AppLocalization).Assembly.GetManifestResourceStream("Nashi.Turkish.json")??throw new InvalidDataException("Missing Turkish UI catalog.");
-        return JsonSerializer.Deserialize<Dictionary<string,string>>(stream)??throw new InvalidDataException("Invalid Turkish UI catalog.");
+        var catalog=JsonSerializer.Deserialize<Dictionary<string,string>>(stream)??throw new InvalidDataException("Invalid Turkish UI catalog.");
+        foreach(var (source,target) in WindowsOnly)catalog.TryAdd(source,target);return catalog;
     }
+    // Windows-only shell integration copy. Kept here rather than in the shared
+    // catalog, whose macOS string tables are generated from it. A property, so
+    // static initialization order cannot leave it empty when Load() runs.
+    private static (string,string)[] WindowsOnly=>
+    [
+        ("Convert with Nashi","Nashi ile dönüştür"),
+        ("Nashi tools…","Nashi araçları…"),
+        ("Show Nashi in Explorer’s right-click menu","Nashi’yi Dosya Gezgini sağ tık menüsünde göster"),
+        ("{0} files can’t become {1} and were skipped.","{0} dosya {1} biçimine dönüştürülemediği için atlandı."),
+        ("Choose at least one existing file to convert.","Dönüştürmek için en az bir mevcut dosya seç."),
+        ("Unknown output format: {0}","Bilinmeyen çıktı biçimi: {0}"),
+        ("Use --convert FORMAT FILE...","--convert BİÇİM DOSYA... biçiminde kullan"),
+    ];
     // Product and key names that keep Latin capitals in Turkish upper case (SHIFT, not SHİFT). Declared before `uppercase`, which uses it.
     public static IReadOnlySet<string> LatinWords{get;}=LoadLatinWords();
     private static HashSet<string> LoadLatinWords()

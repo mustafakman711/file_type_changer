@@ -26,9 +26,11 @@ internal sealed class TrayHost:IDisposable
     [DllImport("user32.dll")]private static extern bool SetForegroundWindow(IntPtr window);
     private TrayIconRecovery? recovery;private readonly HwndSource source;private readonly Notice notice;private readonly Action open;private readonly Func<ContextMenu> menu;private readonly uint taskbarCreated=RegisterWindowMessage("TaskbarCreated");
     internal void UpdateAvailable(string version){notice.Tip="Nashi · Update "+version+" available";if(notice.Tip.Length>127)notice.Tip=notice.Tip[..127];notice.Flags=4;Shell_NotifyIcon(1,notice);}
-    public TrayHost(Window window,Action open,Func<ContextMenu> menu)
+    public TrayHost(Window window,Action open,Func<ContextMenu> menu):this(HwndSource.FromHwnd(new WindowInteropHelper(window).Handle),open,menu){}
+    /// The light resident instance owns the icon through a hidden message window.
+    internal TrayHost(HwndSource window,Action open,Func<ContextMenu> menu)
     {
-        this.open=open;this.menu=menu;var handle=new WindowInteropHelper(window).Handle;source=HwndSource.FromHwnd(handle);source.AddHook(Hook);notice=new(){Size=(uint)Marshal.SizeOf<Notice>(),Window=handle,Id=1,Flags=7,Callback=0x8000+710,Icon=MakeIcon()};if(!Shell_NotifyIcon(0,notice)){Dispose();throw new InvalidOperationException("Windows could not add Nashi to the system tray.");}recovery=new(()=>{notice.Flags=7;return Shell_NotifyIcon(0,notice);},ScheduleRestore,open);
+        this.open=open;this.menu=menu;var handle=window.Handle;source=window;source.AddHook(Hook);notice=new(){Size=(uint)Marshal.SizeOf<Notice>(),Window=handle,Id=1,Flags=7,Callback=0x8000+710,Icon=MakeIcon()};if(!Shell_NotifyIcon(0,notice)){Dispose();throw new InvalidOperationException("Windows could not add Nashi to the system tray.");}recovery=new(()=>{notice.Flags=7;return Shell_NotifyIcon(0,notice);},ScheduleRestore,open);
     }
     private static IntPtr MakeIcon()
     {

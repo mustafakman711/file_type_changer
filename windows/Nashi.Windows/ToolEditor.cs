@@ -23,10 +23,10 @@ public sealed partial class ToolEditor:Window
     internal RangeTimeline Timeline=>timeline;
     internal TextBox FieldForTest(string name)=>fields[name];
     private readonly string input;private readonly MediaInfo? media;private readonly StackPanel options=new(){Margin=new(18,0,0,0)};
-    public ToolEditor(Window owner,string tool,string title,string input,MediaInfo? media=null,BitmapSource? preview=null,IReadOnlyList<string>? inputs=null,string[]? outputFormats=null)
+    public ToolEditor(Window? owner,string tool,string title,string input,MediaInfo? media=null,BitmapSource? preview=null,IReadOnlyList<string>? inputs=null,string[]? outputFormats=null)
     {
         Theme.Attach(this);
-        Owner=owner;this.tool=tool;this.input=input;this.media=media;bitmap=preview;Title=title+" · Nashi";Width=1060;Height=780;MinWidth=800;MinHeight=560;WindowStartupLocation=WindowStartupLocation.CenterOwner;
+        if(owner is not null)Owner=owner;this.tool=tool;this.input=input;this.media=media;bitmap=preview;Title=title+" · Nashi";Width=1060;Height=780;MinWidth=800;MinHeight=560;WindowStartupLocation=WindowStartupLocation.CenterOwner;
         var grid=new Grid{Margin=new(28)};grid.RowDefinitions.Add(new(){Height=GridLength.Auto});grid.RowDefinitions.Add(new(){Height=new(1,GridUnitType.Star)});grid.RowDefinitions.Add(new(){Height=GridLength.Auto});Content=grid;
         var heading=new StackPanel();heading.Children.Add(L10n.Label(new TextBlock{Text=title,FontSize=30,FontWeight=FontWeights.Bold}));heading.Children.Add(new TextBlock{Text=Path.GetFileName(input)+" · "+L10n.Text("Original stays safe"),Foreground=Theme.Brush("Muted"),Margin=new(0,5,0,22)});grid.Children.Add(heading);
         var body=new Grid();body.ColumnDefinitions.Add(new(){Width=new(1.6,GridUnitType.Star)});body.ColumnDefinitions.Add(new(){Width=new(1,GridUnitType.Star)});Grid.SetRow(body,1);grid.Children.Add(body);
@@ -93,11 +93,14 @@ public sealed partial class ToolEditor:Window
         BuildPhotoOptions(inputs??[input]);BuildInputOrder(inputs??[input]);BuildCropOptions();BuildCompressionOptions();BuildDocumentOptions();BuildMediaOptions();
         if(options.Children.Count==1)options.Children.Add(L10n.Label(new TextBlock{Text="Ready to make a fresh copy. No extra settings needed.",TextWrapping=TextWrapping.Wrap,Margin=new(4,20,4,0)}));
         var footer=new DockPanel{Margin=new(0,20,0,0),LastChildFill=false};Grid.SetRow(footer,2);grid.Children.Add(footer);var save=MainWindow.Button("Save new copy  ↗",Save);save.Background=Theme.Primary;save.Foreground=new SolidColorBrush(Color.FromRgb(43,54,28));DockPanel.SetDock(save,Dock.Right);footer.Children.Add(save);var cancel=MainWindow.Button("Cancel",()=>DialogResult=false);DockPanel.SetDock(cancel,Dock.Left);footer.Children.Add(cancel);var reset=MainWindow.Button("↶ Reset",Reset);DockPanel.SetDock(reset,Dock.Left);footer.Children.Add(reset);var safe=L10n.Label(new TextBlock{Text="Original stays safe",Foreground=Theme.Brush("Muted"),FontSize=12,VerticalAlignment=VerticalAlignment.Center,Margin=new(0,0,16,0)});DockPanel.SetDock(safe,Dock.Right);footer.Children.Add(safe);
-        var clock=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(100)};
         clock.Tick+=(_,_)=>{if(!scrubber.IsMouseCaptureWithin&&!scrubber.IsKeyboardFocusWithin)scrubber.Value=Math.Clamp(player.Position.TotalSeconds,0,duration);if(playing){time.Text=$"{player.Position:mm\\:ss\\.fff} / {TimeSpan.FromSeconds(duration):mm\\:ss\\.fff}";if(playingRange&&player.Position.TotalSeconds>=rangePlaybackEnd){player.Pause();playing=false;playingRange=false;}}};
         player.MediaEnded+=(_,_)=>{playing=false;player.Pause();};clock.Start();
-        PreviewKeyDown+=OnKey;Closed+=(_,_)=>{clock.Stop();player.Close();previewLifetime.Cancel();DeletePreviewFiles();};
+        PreviewKeyDown+=OnKey;Closed+=(_,_)=>Discard();
     }
+    private readonly System.Windows.Threading.DispatcherTimer clock=new(){Interval=TimeSpan.FromMilliseconds(100)};private bool discarded;
+    /// Releases an editor whose saved defaults were accepted without showing
+    /// it. Its 100 ms preview clock would otherwise keep the process awake.
+    internal void Discard(){if(discarded)return;discarded=true;clock.Stop();player.Close();previewLifetime.Cancel();DeletePreviewFiles();}
     private static string Number(double n)=>n.ToString("0.###",CultureInfo.CurrentCulture);
     private void Field(string name,double value)=>TextField(name,Number(value));
     private void TextField(string name,string value){options.Children.Add(L10n.Label(new TextBlock{Text=name,Margin=new(4,12,4,0)}));var box=new TextBox{Text=value};System.Windows.Automation.AutomationProperties.SetAutomationId(box,name);if(name is "Start" or "End")box.LostKeyboardFocus+=(_,_)=>{try{SyncTimeline();}catch(ArgumentException){}};fields.Add(name,box);defaults.Add(name,value);options.Children.Add(box);}
